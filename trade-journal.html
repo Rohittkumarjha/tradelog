@@ -513,6 +513,11 @@
       </svg>
       Continue with Google
     </button>
+    <div style="margin-top:12px">
+      <button onclick="demoLogin()" style="background:none;border:1px solid rgba(255,255,255,0.15);color:var(--text3);font-family:var(--font-body);font-size:12px;padding:8px 20px;border-radius:8px;cursor:pointer;transition:all .2s" onmouseover="this.style.borderColor='rgba(255,255,255,0.3)';this.style.color='var(--text2)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.15)';this.style.color='var(--text3)'">
+        Try Demo (no login needed)
+      </button>
+    </div>
     <p class="landing-note">Your data is stored entirely in your own Google Drive. We never store your trades.</p>
   </div>
 </div>
@@ -1350,11 +1355,26 @@ function loadGoogleScript() {
 }
 
 function initGoogleAuth() {
-  // Try to restore session from localStorage
-  const savedToken = localStorage.getItem('tl_access_token');
-  const savedUser = localStorage.getItem('tl_user');
+  const savedToken  = localStorage.getItem('tl_access_token');
+  const savedUser   = localStorage.getItem('tl_user');
   const tokenExpiry = localStorage.getItem('tl_token_expiry');
 
+  // If real Google Client ID is configured, NEVER auto-restore a DEMO_MODE session
+  const hasRealKey = GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID_HERE' && GOOGLE_CLIENT_ID.length > 20;
+
+  if (hasRealKey && savedToken === 'DEMO_MODE') {
+    // Clear leftover demo session so user gets real Google login
+    localStorage.removeItem('tl_access_token');
+    localStorage.removeItem('tl_user');
+    localStorage.removeItem('tl_token_expiry');
+    localStorage.removeItem('tl_accounts');
+    localStorage.removeItem('tl_current_account');
+    hideLoading();
+    showLanding();
+    return;
+  }
+
+  // Restore real session if token is valid and not expired
   if (savedToken && savedUser && tokenExpiry && Date.now() < parseInt(tokenExpiry)) {
     state.accessToken = savedToken;
     state.user = JSON.parse(savedUser);
@@ -1369,17 +1389,29 @@ function initGoogleAuth() {
 }
 
 function handleGoogleLogin() {
-  if (GOOGLE_CLIENT_ID === 'YOUR_GOOGLE_CLIENT_ID_HERE') {
-    toast('⚠️ Please set your Google Client ID in the CONFIG section at the top of the script. See comments for instructions.', 'error');
-    // Demo mode for testing without API
+  const hasRealKey = GOOGLE_CLIENT_ID && GOOGLE_CLIENT_ID !== 'YOUR_GOOGLE_CLIENT_ID_HERE' && GOOGLE_CLIENT_ID.length > 20;
+
+  if (!hasRealKey) {
+    // No real key — use demo mode for testing
+    toast('Running in Demo Mode — add your Google Client ID to enable real login', 'error');
     demoLogin();
     return;
   }
+
+  // Real Google login
+  if (typeof google === 'undefined' || !google.accounts) {
+    toast('Google auth library not loaded. Check your internet connection.', 'error');
+    return;
+  }
+
   const client = google.accounts.oauth2.initTokenClient({
     client_id: GOOGLE_CLIENT_ID,
     scope: SCOPES,
     callback: async (response) => {
-      if (response.error) { toast('Login failed: ' + response.error, 'error'); return; }
+      if (response.error) {
+        toast('Google login failed: ' + response.error, 'error');
+        return;
+      }
       state.accessToken = response.access_token;
       const expiry = Date.now() + (response.expires_in * 1000);
       localStorage.setItem('tl_access_token', response.access_token);
