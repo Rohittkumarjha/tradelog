@@ -25,47 +25,67 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show repo contents (debug)
+      - name: Show repo contents
         run: |
-          echo "Files in repo root:"
+          echo "=== Files in repo ==="
           ls -la
           echo ""
-          echo "HTML files found:"
+          echo "=== HTML files ==="
           find . -name "*.html" -not -path "./.git/*"
+          echo ""
+          echo "=== Checking placeholders exist in source ==="
+          grep -c "YOUR_GOOGLE_CLIENT_ID_HERE" trade-journal.html && echo "✓ Google placeholder found" || echo "✗ Google placeholder NOT found"
+          grep -c "YOUR_ANTHROPIC_API_KEY_HERE" trade-journal.html && echo "✓ Anthropic placeholder found" || echo "✗ Anthropic placeholder NOT found"
 
-      - name: Inject API keys from GitHub Secrets
+      - name: Check secrets are set
         run: |
-          # Find the HTML file automatically
-          HTML_FILE=$(find . -maxdepth 2 -name "*.html" -not -path "./.git/*" | head -1)
-          if [ -z "$HTML_FILE" ]; then
-            echo "ERROR: No HTML file found in repo!"
+          if [ -z "${{ secrets.GOOGLE_CLIENT_ID }}" ]; then
+            echo "ERROR: GOOGLE_CLIENT_ID secret is empty or not set!"
             exit 1
+          else
+            echo "✓ GOOGLE_CLIENT_ID secret exists (length: ${#GOOGLE_CLIENT_ID})"
           fi
-          echo "Found HTML file: $HTML_FILE"
-          sed -i "s|YOUR_GOOGLE_CLIENT_ID_HERE|${{ secrets.GOOGLE_CLIENT_ID }}|g" "$HTML_FILE"
-          sed -i "s|YOUR_ANTHROPIC_API_KEY_HERE|${{ secrets.ANTHROPIC_API_KEY }}|g" "$HTML_FILE"
-          echo "✓ Keys injected into $HTML_FILE"
-          # Save filename for next step
-          echo "HTML_FILE=$HTML_FILE" >> $GITHUB_ENV
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "ERROR: ANTHROPIC_API_KEY secret is empty or not set!"
+            exit 1
+          else
+            echo "✓ ANTHROPIC_API_KEY secret exists"
+          fi
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+
+      - name: Inject API keys into HTML
+        run: |
+          cp trade-journal.html _build.html
+          
+          # Replace Google Client ID
+          sed -i "s|YOUR_GOOGLE_CLIENT_ID_HERE|${{ secrets.GOOGLE_CLIENT_ID }}|g" _build.html
+          
+          # Replace Anthropic key
+          sed -i "s|YOUR_ANTHROPIC_API_KEY_HERE|${{ secrets.ANTHROPIC_API_KEY }}|g" _build.html
+          
+          echo "=== Verifying injection ==="
+          if grep -q "YOUR_GOOGLE_CLIENT_ID_HERE" _build.html; then
+            echo "FAILED: Google Client ID was NOT injected!"
+            exit 1
+          else
+            echo "✓ Google Client ID injected successfully"
+          fi
+          if grep -q "YOUR_ANTHROPIC_API_KEY_HERE" _build.html; then
+            echo "FAILED: Anthropic key was NOT injected!"
+            exit 1
+          else
+            echo "✓ Anthropic API key injected successfully"
+          fi
+          
+          # Show first few chars of injected client ID (safe to log, not a secret)
+          echo "Client ID starts with: $(grep -o "GOOGLE_CLIENT_ID = '[^']*'" _build.html | cut -c1-40)..."
 
       - name: Create deploy folder
         run: |
           mkdir -p _site
-          cp "$HTML_FILE" _site/index.html
-          echo "✓ Copied to _site/index.html"
-
-      - name: Verify keys were injected
-        run: |
-          if grep -q "YOUR_GOOGLE_CLIENT_ID_HERE" _site/index.html; then
-            echo "⚠ WARNING: GOOGLE_CLIENT_ID not injected — check your secret name is exactly: GOOGLE_CLIENT_ID"
-          else
-            echo "✓ Google Client ID injected successfully"
-          fi
-          if grep -q "YOUR_ANTHROPIC_API_KEY_HERE" _site/index.html; then
-            echo "⚠ WARNING: ANTHROPIC_API_KEY not injected — check your secret name is exactly: ANTHROPIC_API_KEY"
-          else
-            echo "✓ Anthropic API key injected successfully"
-          fi
+          cp _build.html _site/index.html
+          echo "✓ Site ready — $(wc -c < _site/index.html) bytes"
 
       - name: Setup GitHub Pages
         uses: actions/configure-pages@v4
@@ -78,4 +98,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-
