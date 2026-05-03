@@ -1,0 +1,100 @@
+name: Build & Deploy TradeLog
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Show repo contents
+        run: |
+          echo "=== Files in repo ==="
+          ls -la
+          echo ""
+          echo "=== HTML files ==="
+          find . -name "*.html" -not -path "./.git/*"
+          echo ""
+          echo "=== Checking placeholders exist in source ==="
+          grep -c "YOUR_GOOGLE_CLIENT_ID_HERE" trade-journal.html && echo "✓ Google placeholder found" || echo "✗ Google placeholder NOT found"
+          grep -c "YOUR_ANTHROPIC_API_KEY_HERE" trade-journal.html && echo "✓ Anthropic placeholder found" || echo "✗ Anthropic placeholder NOT found"
+
+      - name: Check secrets are set
+        run: |
+          if [ -z "${{ secrets.GOOGLE_CLIENT_ID }}" ]; then
+            echo "ERROR: GOOGLE_CLIENT_ID secret is empty or not set!"
+            exit 1
+          else
+            echo "✓ GOOGLE_CLIENT_ID secret exists (length: ${#GOOGLE_CLIENT_ID})"
+          fi
+          if [ -z "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
+            echo "ERROR: ANTHROPIC_API_KEY secret is empty or not set!"
+            exit 1
+          else
+            echo "✓ ANTHROPIC_API_KEY secret exists"
+          fi
+        env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+
+      - name: Inject API keys into HTML
+        run: |
+          cp trade-journal.html _build.html
+          
+          # Replace Google Client ID
+          sed -i "s|YOUR_GOOGLE_CLIENT_ID_HERE|${{ secrets.GOOGLE_CLIENT_ID }}|g" _build.html
+          
+          # Replace Anthropic key
+          sed -i "s|YOUR_ANTHROPIC_API_KEY_HERE|${{ secrets.ANTHROPIC_API_KEY }}|g" _build.html
+          
+          echo "=== Verifying injection ==="
+          if grep -q "YOUR_GOOGLE_CLIENT_ID_HERE" _build.html; then
+            echo "FAILED: Google Client ID was NOT injected!"
+            exit 1
+          else
+            echo "✓ Google Client ID injected successfully"
+          fi
+          if grep -q "YOUR_ANTHROPIC_API_KEY_HERE" _build.html; then
+            echo "FAILED: Anthropic key was NOT injected!"
+            exit 1
+          else
+            echo "✓ Anthropic API key injected successfully"
+          fi
+          
+          # Show first few chars of injected client ID (safe to log, not a secret)
+          echo "Client ID starts with: $(grep -o "GOOGLE_CLIENT_ID = '[^']*'" _build.html | cut -c1-40)..."
+
+      - name: Create deploy folder
+        run: |
+          mkdir -p _site
+          cp _build.html _site/index.html
+          echo "✓ Site ready — $(wc -c < _site/index.html) bytes"
+
+      - name: Setup GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload site artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
